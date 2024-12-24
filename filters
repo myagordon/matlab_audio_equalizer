@@ -1,0 +1,130 @@
+clc;
+clear;
+close all;
+
+filtersFile = 'filters.mat';
+if isfile(filtersFile)
+    load(filtersFile);
+else
+    error('Filters file not found: %s', filtersFile);
+end
+
+% Select audio file
+[file, path] = uigetfile('*.wav', 'Select an audio file');
+if isequal(file, 0)
+    error('No file selected.');
+end
+[filePath, fileName, fileExt] = fileparts(file);
+info = audioinfo(fullfile(path, file));
+[x, Fs] = audioread(fullfile(path, file));
+
+prompt = {
+    'Enter gain for 0-170 Hz band (in dB):',
+    'Enter gain for 170-310 Hz band (in dB):',
+    'Enter gain for 310-600 Hz band (in dB):',
+    'Enter gain for 600-1000 Hz band (in dB):',
+    'Enter gain for 1-3 KHz band (in dB):',
+    'Enter gain for 3-6 KHz band (in dB):',
+    'Enter gain for 6-12 KHz band (in dB):',
+    'Enter gain for 12-14 KHz band (in dB):',
+    'Enter gain for 14-16 KHz band (in dB):'
+};
+inputGain = inputdlg(prompt, 'Frequency Band Gains', [1 50]);
+if isempty(inputGain)
+    error('No gain values provided.');
+end
+gain = cellfun(@str2double, inputGain);
+
+% user inputs filter type
+filterOptions = {'IIR', 'FIR'};
+index = listdlg('PromptString', 'Select filter type:', 'SelectionMode', 'single', 'ListString', filterOptions);
+if isempty(index)
+    error('No filter type selected.');
+end
+type = filterOptions{index};
+
+% specify output sampling rate
+outputFs = str2double(inputdlg('Enter output sampling rate (in Hz):', 'Output Sampling Rate', [1 50]));
+if isnan(outputFs)
+    error('Invalid sampling rate.');
+end
+
+% apply filter to audio with selected filters and gain
+bands = {'0-170 Hz', '170-310 Hz', '310-600 Hz', '600-1000 Hz', '1-3 KHz', '3-6 KHz', '6-12 KHz', '12-14 KHz', '14-16 KHz'};
+y = zeros(size(x));
+
+for i = 1:numel(bands)
+    filterVar = sprintf('%s%d%d', lower(type), bands{i}(1:end-3));
+    if ~exist(filterVar, 'var')
+        warning('Filter for %s not found. Skipping.', bands{i});
+        continue;
+    end
+    
+    currentFilter = eval(filterVar);
+    filteredSignal = filter(currentFilter, x);
+    filteredSignal = filteredSignal .* db2mag(gain(i));
+    y = y + filteredSignal;
+
+    % Plot each band
+    analyseFilter(filteredSignal, x, info, sprintf('%s Filter - %s', type, bands{i}));
+end
+
+% Plot final signal
+plotCompositeSignal(y, x, outputFs, info);
+
+% Save output
+outputFile = fullfile(path, sprintf('%s_composite%s', fileName, fileExt));
+audiowrite(outputFile, y, outputFs);
+fprintf('Composite audio saved to: %s\n', outputFile);
+
+% ALL HELPER FUNCTIONS BELOW 
+function analyseFilter(filteredSignal, originalSignal, info, filterName)
+    Fs = info.SampleRate;
+    t = (0:length(originalSignal)-1) / Fs;
+    Fvec = linspace(-Fs/2, Fs/2, length(t));
+    Y = fftshift(fft(filteredSignal));
+
+    figure('Name', filterName);
+    subplot(3, 1, 1);
+    plot(t, originalSignal);
+    grid on;
+    title('Original Signal (Time Domain)');
+    xlabel('Time (s)'); ylabel('Amplitude');
+
+    subplot(3, 1, 2);
+    plot(t, filteredSignal);
+    grid on;
+    title(sprintf('%s (Time Domain)', filterName));
+    xlabel('Time (s)'); ylabel('Amplitude');
+
+    subplot(3, 1, 3);
+    plot(Fvec, abs(Y));
+    grid on;
+    title(sprintf('%s (Frequency Domain)', filterName));
+    xlabel('Frequency (Hz)'); ylabel('|Magnitude|');
+end
+
+function plotCompositeSignal(compositeSignal, originalSignal, Fs, info)
+    t = (0:length(originalSignal)-1) / Fs;
+    Fvec = linspace(-Fs/2, Fs/2, length(t));
+    Y = fftshift(fft(compositeSignal));
+
+    figure('Name', 'Composite Signal Analysis');
+    subplot(3, 1, 1);
+    plot(t, originalSignal);
+    grid on;
+    title('Original Signal (Time Domain)');
+    xlabel('Time (s)'); ylabel('Amplitude');
+
+    subplot(3, 1, 2);
+    plot(t, compositeSignal);
+    grid on;
+    title('Composite Signal (Time Domain)');
+    xlabel('Time (s)'); ylabel('Amplitude');
+
+    subplot(3, 1, 3);
+    plot(Fvec, abs(Y));
+    grid on;
+    title('Composite Signal (Frequency Domain)');
+    xlabel('Frequency (Hz)'); ylabel('|Magnitude|');
+end
